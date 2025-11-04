@@ -584,7 +584,8 @@ async function buildNzbdavStream({ downloadUrl, category, title, requestedEpisod
       category: slotCategory,
       jobName: slotJobName,
       viewPath: bestFile.viewPath,
-      size: bestFile.size
+      size: bestFile.size,
+      fileName: bestFile.name
     };
   } catch (error) {
     if (error?.isNzbdavFailure) {
@@ -596,7 +597,7 @@ async function buildNzbdavStream({ downloadUrl, category, title, requestedEpisod
   }
 }
 
-async function proxyNzbdavStream(req, res, viewPath) {
+async function proxyNzbdavStream(req, res, viewPath, fileNameHint = '') {
   const originalMethod = (req.method || 'GET').toUpperCase();
   if (!NZBDAV_SUPPORTED_METHODS.has(originalMethod)) {
     res.status(405).send('Method Not Allowed');
@@ -616,6 +617,34 @@ async function proxyNzbdavStream(req, res, viewPath) {
   const headers = {};
 
   console.log(`[NZBDAV] Streaming ${normalizedPath} via WebDAV`);
+
+  const coerceToString = (value) => {
+    if (Array.isArray(value)) {
+      return value.find((item) => typeof item === 'string' && item.trim().length > 0) || '';
+    }
+    return typeof value === 'string' ? value : '';
+  };
+
+  let derivedFileName = typeof fileNameHint === 'string' ? fileNameHint.trim() : '';
+  if (!derivedFileName) {
+    const segments = normalizedPath.split('/').filter(Boolean);
+    if (segments.length > 0) {
+      const lastSegment = segments[segments.length - 1];
+      try {
+        derivedFileName = decodeURIComponent(lastSegment);
+      } catch (decodeError) {
+        derivedFileName = lastSegment;
+      }
+    }
+  }
+  if (!derivedFileName) {
+    derivedFileName = coerceToString(req.query?.title || '').trim();
+  }
+  if (!derivedFileName) {
+    derivedFileName = 'stream';
+  }
+
+  const sanitizedFileName = derivedFileName.replace(/[\\/:*?"<>|]+/g, '_') || 'stream';
 
   if (req.headers.range) headers.Range = req.headers.range;
   if (req.headers['if-range']) headers['If-Range'] = req.headers['if-range'];
@@ -655,6 +684,12 @@ async function proxyNzbdavStream(req, res, viewPath) {
     }
     res.setHeader(key, value);
   });
+
+  const incomingDisposition = nzbdavResponse.headers?.['content-disposition'];
+  const hasFilenameInDisposition = typeof incomingDisposition === 'string' && /filename=/i.test(incomingDisposition);
+  if (!hasFilenameInDisposition) {
+    res.setHeader('Content-Disposition', `inline; filename="${sanitizedFileName}"`);
+  }
 
   if (emulateHead || !nzbdavResponse.data || typeof nzbdavResponse.data.pipe !== 'function') {
     if (nzbdavResponse.data && typeof nzbdavResponse.data.destroy === 'function') {
@@ -1198,7 +1233,7 @@ async function handleNzbdavStream(req, res) {
       buildNzbdavStream({ downloadUrl, category, title, requestedEpisode })
     );
 
-    await proxyNzbdavStream(req, res, streamData.viewPath);
+    await proxyNzbdavStream(req, res, streamData.viewPath, streamData.fileName || '');
   } catch (error) {
     if (error?.isNzbdavFailure) {
       console.warn('[NZBDAV] Stream failure detected:', error.failureMessage || error.message);
