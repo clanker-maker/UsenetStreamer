@@ -96,7 +96,7 @@ const NZBDAV_POLL_INTERVAL_MS = 2000;
 const NZBDAV_POLL_TIMEOUT_MS = 80000;
 const NZBDAV_HISTORY_FETCH_LIMIT = (() => {
   const raw = Number(process.env.NZBDAV_HISTORY_FETCH_LIMIT);
-  return Number.isFinite(raw) && raw > 0 ? Math.min(raw, 500) : 200;
+  return Number.isFinite(raw) && raw > 0 ? Math.min(raw, 500) : 400;
 })();
 const NZBDAV_CACHE_TTL_MINUTES = (() => {
   const raw = Number(process.env.NZBDAV_CACHE_TTL_MINUTES);
