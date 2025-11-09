@@ -8,6 +8,7 @@ const { pipeline } = require('stream');
 const { promisify } = require('util');
 // webdav is an ES module; we'll import it lazily when first needed
 const path = require('path');
+const { triageAndRank } = require('./nzbTriageRunner');
 
 const app = express();
 const port = Number(process.env.PORT || 7000);
@@ -101,6 +102,101 @@ function stripTrailingSlashes(value) {
     result = result.slice(0, -1);
   }
   return result;
+}
+
+function toFiniteNumber(value, defaultValue = undefined) {
+  if (value === undefined || value === null || value === '') return defaultValue;
+  const num = Number(value);
+  return Number.isFinite(num) ? num : defaultValue;
+}
+
+function toPositiveInt(value, defaultValue) {
+  const parsed = toFiniteNumber(value, undefined);
+  if (!Number.isFinite(parsed) || parsed <= 0) return defaultValue;
+  return Math.floor(parsed);
+}
+
+function toBoolean(value, defaultValue = false) {
+  if (value === undefined || value === null || value === '') return defaultValue;
+  if (typeof value === 'boolean') return value;
+  const normalized = String(value).trim().toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
+  if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
+  return defaultValue;
+}
+
+function parseCommaList(value) {
+  if (typeof value !== 'string') return [];
+  return value
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+}
+
+function parsePathList(value) {
+  if (typeof value !== 'string' || value.trim() === '') return [];
+  return value
+    .split(path.delimiter)
+    .map((segment) => segment.trim())
+    .filter((segment) => segment.length > 0)
+    .map((segment) => (path.isAbsolute(segment) ? segment : path.resolve(process.cwd(), segment)));
+}
+
+function buildTriageNntpConfig() {
+  const host = (process.env.NZB_TRIAGE_NNTP_HOST || '').trim();
+  if (!host) return null;
+  return {
+    host,
+    port: toPositiveInt(process.env.NZB_TRIAGE_NNTP_PORT, 119),
+    user: (process.env.NZB_TRIAGE_NNTP_USER || '').trim() || undefined,
+    pass: (process.env.NZB_TRIAGE_NNTP_PASS || '').trim() || undefined,
+    useTLS: toBoolean(process.env.NZB_TRIAGE_NNTP_TLS, false),
+  };
+}
+
+const TRIAGE_ENABLED = toBoolean(process.env.NZB_TRIAGE_ENABLED, false);
+const TRIAGE_TIME_BUDGET_MS = toPositiveInt(process.env.NZB_TRIAGE_TIME_BUDGET_MS, 12000);
+const TRIAGE_MAX_CANDIDATES = toPositiveInt(process.env.NZB_TRIAGE_MAX_CANDIDATES, 25);
+const TRIAGE_DOWNLOAD_CONCURRENCY = toPositiveInt(process.env.NZB_TRIAGE_DOWNLOAD_CONCURRENCY, 8);
+const TRIAGE_DOWNLOAD_TIMEOUT_MS = toPositiveInt(process.env.NZB_TRIAGE_DOWNLOAD_TIMEOUT_MS, 4000);
+const TRIAGE_PREFERRED_SIZE_GB = toFiniteNumber(process.env.NZB_TRIAGE_PREFERRED_SIZE_GB, null);
+const TRIAGE_PREFERRED_SIZE_BYTES = Number.isFinite(TRIAGE_PREFERRED_SIZE_GB) && TRIAGE_PREFERRED_SIZE_GB > 0
+  ? TRIAGE_PREFERRED_SIZE_GB * 1024 * 1024 * 1024
+  : null;
+const TRIAGE_PRIORITY_INDEXERS = parseCommaList(process.env.NZB_TRIAGE_PRIORITY_INDEXERS);
+const TRIAGE_ARCHIVE_DIRS = parsePathList(process.env.NZB_TRIAGE_ARCHIVE_DIRS);
+const TRIAGE_NNTP_CONFIG = buildTriageNntpConfig();
+const TRIAGE_STAT_TIMEOUT_MS = toPositiveInt(process.env.NZB_TRIAGE_STAT_TIMEOUT_MS, 1200);
+const TRIAGE_FETCH_TIMEOUT_MS = toPositiveInt(process.env.NZB_TRIAGE_FETCH_TIMEOUT_MS, 3500);
+const TRIAGE_MAX_DECODED_BYTES = toPositiveInt(process.env.NZB_TRIAGE_MAX_DECODED_BYTES, 32 * 1024);
+const TRIAGE_NNTP_MAX_CONNECTIONS = toPositiveInt(process.env.NZB_TRIAGE_MAX_CONNECTIONS, 60);
+const TRIAGE_MAX_PARALLEL_NZBS = toPositiveInt(process.env.NZB_TRIAGE_MAX_PARALLEL_NZBS, 16);
+const TRIAGE_STAT_SAMPLE_COUNT = toPositiveInt(process.env.NZB_TRIAGE_STAT_SAMPLE_COUNT, 6);
+const TRIAGE_ARCHIVE_SAMPLE_COUNT = toPositiveInt(process.env.NZB_TRIAGE_ARCHIVE_SAMPLE_COUNT, 4);
+
+const TRIAGE_BASE_OPTIONS = {
+  archiveDirs: TRIAGE_ARCHIVE_DIRS,
+  statTimeoutMs: TRIAGE_STAT_TIMEOUT_MS,
+  fetchTimeoutMs: TRIAGE_FETCH_TIMEOUT_MS,
+  maxDecodedBytes: TRIAGE_MAX_DECODED_BYTES,
+  nntpMaxConnections: TRIAGE_NNTP_MAX_CONNECTIONS,
+  maxParallelNzbs: TRIAGE_MAX_PARALLEL_NZBS,
+  statSampleCount: TRIAGE_STAT_SAMPLE_COUNT,
+  archiveSampleCount: TRIAGE_ARCHIVE_SAMPLE_COUNT,
+};
+
+function extractTriageOverrides(query) {
+  if (!query || typeof query !== 'object') return {};
+  const sizeCandidate = query.triageSizeGb ?? query.triage_size_gb ?? query.preferredSizeGb;
+  const sizeGb = toFiniteNumber(sizeCandidate, null);
+  const sizeBytes = Number.isFinite(sizeGb) && sizeGb > 0 ? sizeGb * 1024 * 1024 * 1024 : null;
+  let indexerSource = null;
+  if (typeof query.triageIndexerIds === 'string') indexerSource = query.triageIndexerIds;
+  else if (Array.isArray(query.triageIndexerIds)) indexerSource = query.triageIndexerIds.join(',');
+  const indexers = indexerSource ? parseCommaList(indexerSource) : null;
+  const disabled = query.triageDisabled !== undefined ? toBoolean(query.triageDisabled, true) : null;
+  const enabled = query.triageEnabled !== undefined ? toBoolean(query.triageEnabled, false) : null;
+  return { sizeBytes, indexers, disabled, enabled };
 }
 
 const OBFUSCATED_SPECIAL_PROVIDER_URL = 'aHR0cHM6Ly9kaXJ0eS1waW5rLmVycy5wdw==';
@@ -780,6 +876,52 @@ function inferMimeType(fileName) {
 function normalizeReleaseTitle(title) {
   if (!title) return '';
   return title.toString().trim().toLowerCase();
+}
+
+function triageStatusRank(status) {
+  switch (status) {
+    case 'blocked':
+    case 'fetch-error':
+    case 'error':
+      return 4;
+    case 'verified':
+      return 3;
+    case 'unverified':
+      return 2;
+    case 'pending':
+    case 'skipped':
+      return 1;
+    default:
+      return 0;
+  }
+}
+
+function buildTriageTitleMap(decisions) {
+  const titleMap = new Map();
+  if (!(decisions instanceof Map)) return titleMap;
+
+  decisions.forEach((decision, downloadUrl) => {
+    if (!decision) return;
+    const status = decision.status;
+    if (!status || status === 'pending' || status === 'skipped') return;
+    const normalizedTitle = decision.normalizedTitle || normalizeReleaseTitle(decision.title);
+    if (!normalizedTitle) return;
+    const existing = titleMap.get(normalizedTitle);
+    if (!existing || triageStatusRank(status) >= triageStatusRank(existing.status)) {
+      titleMap.set(normalizedTitle, {
+        status,
+        blockers: Array.isArray(decision.blockers) ? decision.blockers.slice() : [],
+        warnings: Array.isArray(decision.warnings) ? decision.warnings.slice() : [],
+        archiveFindings: Array.isArray(decision.archiveFindings) ? decision.archiveFindings.slice() : [],
+        fileCount: decision.fileCount ?? null,
+        normalizedTitle,
+        title: decision.title || null,
+        sourceDownloadUrl: downloadUrl,
+      });
+    }
+  });
+
+  return titleMap;
 }
 
 async function fetchCompletedNzbdavHistory(categories = []) {
@@ -1875,6 +2017,77 @@ async function streamHandler(req, res) {
 
   console.log(`${INDEXER_LOG_PREFIX} Final NZB selection: ${finalNzbResults.length} results`);
 
+    const triageOverrides = extractTriageOverrides(req.query || {});
+    const requestedDisable = triageOverrides.disabled === true;
+    const requestedEnable = triageOverrides.enabled === true;
+    const shouldAttemptTriage = finalNzbResults.length > 0 && !requestedDisable && (requestedEnable || TRIAGE_ENABLED);
+    let triageOutcome = null;
+    let triageDecisions = new Map();
+  let triageTitleMap = new Map();
+
+    if (shouldAttemptTriage) {
+      if (!TRIAGE_NNTP_CONFIG) {
+        console.warn('[NZB TRIAGE] Skipping health checks because NNTP configuration is missing');
+      } else {
+        const preferredSizeBytes = triageOverrides.sizeBytes ?? TRIAGE_PREFERRED_SIZE_BYTES;
+        const preferredIndexerTokens = (triageOverrides.indexers && triageOverrides.indexers.length > 0)
+          ? triageOverrides.indexers
+          : TRIAGE_PRIORITY_INDEXERS;
+        const triageLogger = (level, message, context) => {
+          const logFn = level === 'error' ? console.error : level === 'warn' ? console.warn : console.log;
+          if (context) logFn(`[NZB TRIAGE] ${message}`, context);
+          else logFn(`[NZB TRIAGE] ${message}`);
+        };
+        const triageOptions = {
+          preferredSizeBytes,
+          preferredIndexerIds: preferredIndexerTokens,
+          timeBudgetMs: TRIAGE_TIME_BUDGET_MS,
+          maxCandidates: TRIAGE_MAX_CANDIDATES,
+          downloadConcurrency: TRIAGE_DOWNLOAD_CONCURRENCY,
+          downloadTimeoutMs: TRIAGE_DOWNLOAD_TIMEOUT_MS,
+          triageOptions: {
+            ...TRIAGE_BASE_OPTIONS,
+            nntpConfig: { ...TRIAGE_NNTP_CONFIG },
+          },
+          logger: triageLogger,
+        };
+        try {
+          triageOutcome = await triageAndRank(finalNzbResults, triageOptions);
+          triageDecisions = triageOutcome?.decisions instanceof Map ? triageOutcome.decisions : new Map(triageOutcome?.decisions || []);
+          triageTitleMap = buildTriageTitleMap(triageDecisions);
+          console.log(`[NZB TRIAGE] Evaluated ${triageOutcome.evaluatedCount}/${triageOutcome.candidatesConsidered} candidate NZBs in ${triageOutcome.elapsedMs} ms (timedOut=${triageOutcome.timedOut})`);
+          if (triageDecisions.size > 0) {
+            const statusCounts = {};
+            let loggedSamples = 0;
+            const sampleLimit = 5;
+            triageDecisions.forEach((decision, downloadUrl) => {
+              const status = decision?.status || 'unknown';
+              statusCounts[status] = (statusCounts[status] || 0) + 1;
+              if (loggedSamples < sampleLimit) {
+                console.log('[NZB TRIAGE] Decision sample', {
+                  status,
+                  blockers: decision?.blockers || [],
+                  warnings: decision?.warnings || [],
+                  fileCount: decision?.fileCount ?? null,
+                  nzbIndex: decision?.nzbIndex ?? null,
+                  downloadUrl
+                });
+                loggedSamples += 1;
+              }
+            });
+            if (triageDecisions.size > sampleLimit) {
+              console.log(`[NZB TRIAGE] (${triageDecisions.size - sampleLimit}) additional decisions omitted from sample log`);
+            }
+            console.log('[NZB TRIAGE] Decision status breakdown', statusCounts);
+          } else {
+            console.log('[NZB TRIAGE] No decisions were produced by the triage runner');
+          }
+        } catch (triageError) {
+          console.warn(`[NZB TRIAGE] Health check failed: ${triageError.message}`);
+        }
+      }
+    }
+
     cleanupNzbdavCache();
 
     const categoryForType = getNzbdavCategory(type);
@@ -1890,8 +2103,10 @@ async function streamHandler(req, res) {
 
     const addonBaseUrl = ADDON_BASE_URL.replace(/\/$/, '');
 
-    const streams = finalNzbResults
-      .sort((a, b) => (b.size || 0) - (a.size || 0))
+    let triageLogCount = 0;
+    let triageLogSuppressed = false;
+
+    const decoratedStreams = finalNzbResults
       .map((result) => {
         const sizeInGB = result.size ? (result.size / 1073741824).toFixed(2) : null;
         const sizeString = sizeInGB ? `${sizeInGB} GB` : 'Size Unknown';
@@ -1906,15 +2121,76 @@ async function streamHandler(req, res) {
         });
 
         baseParams.set('downloadUrl', result.downloadUrl);
-  if (result.guid) baseParams.set('guid', result.guid);
-  if (result.size) baseParams.set('size', String(result.size));
-    if (result.title) baseParams.set('title', result.title);
+        if (result.guid) baseParams.set('guid', result.guid);
+        if (result.size) baseParams.set('size', String(result.size));
+        if (result.title) baseParams.set('title', result.title);
 
         const cacheKey = buildNzbdavCacheKey(result.downloadUrl, categoryForType, requestedEpisode);
         const cacheEntry = nzbdavStreamCache.get(cacheKey);
         const normalizedTitle = normalizeReleaseTitle(result.title);
         const historySlot = normalizedTitle ? historyByTitle.get(normalizedTitle) : null;
         const isInstant = cacheEntry?.status === 'ready' || Boolean(historySlot);
+
+  const directTriageInfo = triageDecisions.get(result.downloadUrl);
+  const fallbackTitleKey = normalizedTitle;
+  const fallbackTriageInfo = !directTriageInfo && fallbackTitleKey ? triageTitleMap.get(fallbackTitleKey) : null;
+  const triageInfo = directTriageInfo || fallbackTriageInfo || null;
+  const triageApplied = Boolean(directTriageInfo);
+  const triageDerivedFromTitle = Boolean(!directTriageInfo && fallbackTriageInfo);
+  const triageStatus = triageInfo?.status || (triageApplied ? 'unknown' : 'not-run');
+        let triagePriority = 1;
+        let triageTag = null;
+
+        if (triageStatus === 'verified') {
+          triagePriority = 0;
+          triageTag = '✅ Verified';
+        } else if (triageStatus === 'unverified') {
+          triageTag = '⚠️ Not Verified';
+        } else if (triageStatus === 'blocked') {
+          triagePriority = 2;
+          triageTag = '🚫 Not Playable';
+        } else if (triageStatus === 'fetch-error') {
+          triagePriority = 2;
+          triageTag = '⚠️ NZB Fetch Failed';
+        } else if (triageStatus === 'error') {
+          triagePriority = 2;
+          triageTag = '⚠️ Health Check Error';
+        } else if (triageStatus === 'pending' || triageStatus === 'skipped') {
+          if (triageOutcome?.timedOut) triageTag = '⏱️ Health Check Pending';
+        }
+
+  const archiveFindings = triageInfo?.archiveFindings || [];
+        const archiveStatuses = archiveFindings.map((finding) => String(finding?.status || '').toLowerCase());
+        const archiveFailureTokens = new Set([
+          'rar-compressed',
+          'rar-encrypted',
+          'rar-solid',
+          'rar5-unsupported',
+          'sevenzip-unsupported',
+          'archive-not-found',
+          'archive-no-segments',
+          'rar-insufficient-data',
+          'rar-header-not-found',
+        ]);
+        const passedArchiveCheck = archiveStatuses.some((status) => status === 'rar-stored' || status === 'sevenzip-stored');
+        const failedArchiveCheck = (triageInfo?.blockers || []).some((blocker) => archiveFailureTokens.has(blocker))
+          || archiveStatuses.some((status) => archiveFailureTokens.has(status));
+        let archiveCheckStatus = 'not-run';
+        if (triageInfo) {
+          if (failedArchiveCheck) archiveCheckStatus = 'failed';
+          else if (passedArchiveCheck) archiveCheckStatus = 'passed';
+          else if (archiveFindings.length > 0) archiveCheckStatus = 'inconclusive';
+        }
+
+        const missingArticlesFailure = (triageInfo?.blockers || []).includes('missing-articles')
+          || archiveStatuses.includes('segment-missing');
+        const missingArticlesSuccess = archiveStatuses.includes('segment-ok');
+        let missingArticlesStatus = 'not-run';
+        if (triageInfo) {
+          if (missingArticlesFailure) missingArticlesStatus = 'failed';
+          else if (missingArticlesSuccess) missingArticlesStatus = 'passed';
+          else if (archiveFindings.length > 0) missingArticlesStatus = 'inconclusive';
+        }
 
         if (historySlot?.nzoId) {
           baseParams.set('historyNzoId', historySlot.nzoId);
@@ -1928,11 +2204,12 @@ async function streamHandler(req, res) {
 
         const tokenSegment = ADDON_SHARED_SECRET ? `/${ADDON_SHARED_SECRET}` : '';
         const streamUrl = `${addonBaseUrl}${tokenSegment}/nzb/stream?${baseParams.toString()}`;
-  const tags = [];
-  if (isInstant) tags.push('⚡ Instant');
-  tags.push('📰 NZB');
-  if (quality) tags.push(quality);
-  if (sizeString) tags.push(sizeString);
+        const tags = [];
+        if (triageTag) tags.push(triageTag);
+        if (isInstant) tags.push('⚡ Instant');
+        tags.push('📰 NZB');
+        if (quality) tags.push(quality);
+        if (sizeString) tags.push(sizeString);
         const name = 'UsenetStreamer';
         const behaviorHints = {
           notWebReady: true,
@@ -1949,7 +2226,29 @@ async function streamHandler(req, res) {
           }
         }
 
-        return {
+        if (triageApplied && triageLogCount < 10) {
+          console.log('[NZB TRIAGE] Stream candidate status', {
+            title: result.title,
+            downloadUrl: result.downloadUrl,
+            status: triageStatus,
+            triageApplied,
+            triagePriority,
+            blockers: triageInfo?.blockers || [],
+            warnings: triageInfo?.warnings || [],
+            archiveFindings: triageInfo?.archiveFindings || [],
+            archiveCheckStatus,
+            missingArticlesStatus,
+            timedOut: Boolean(triageOutcome?.timedOut)
+          });
+          triageLogCount += 1;
+        } else if (!triageApplied) {
+          // Skip logging for streams that were never part of the triage batch
+        } else if (!triageLogSuppressed) {
+          console.log('[NZB TRIAGE] Additional stream triage logs suppressed');
+          triageLogSuppressed = true;
+        }
+
+        const stream = {
           title: `${result.title}\n${tags.filter(Boolean).join(' • ')}\n${result.indexer}`,
           name,
           url: streamUrl,
@@ -1966,8 +2265,44 @@ async function streamHandler(req, res) {
             cachedFromSession: cacheEntry?.status === 'ready'
           }
         };
+        if (triageTag || triageInfo || triageOutcome?.timedOut || !triageApplied) {
+          if (triageInfo) {
+            stream.meta.healthCheck = {
+              status: triageStatus,
+              blockers: triageInfo.blockers || [],
+              warnings: triageInfo.warnings || [],
+              fileCount: triageInfo.fileCount,
+              archiveCheck: archiveCheckStatus,
+              missingArticlesCheck: missingArticlesStatus,
+              applied: triageApplied,
+              inheritedFromTitle: triageDerivedFromTitle,
+            };
+            stream.meta.healthCheck.archiveFindings = archiveFindings;
+            if (triageInfo.sourceDownloadUrl) {
+              stream.meta.healthCheck.sourceDownloadUrl = triageInfo.sourceDownloadUrl;
+            }
+          } else {
+            stream.meta.healthCheck = {
+              status: triageOutcome?.timedOut ? 'pending' : 'not-run',
+              applied: false,
+            };
+          }
+        }
+
+        return {
+          stream,
+          triagePriority,
+          size: result.size || 0,
+        };
       })
       .filter(Boolean);
+
+    const streams = decoratedStreams
+      .sort((a, b) => {
+        if (a.triagePriority !== b.triagePriority) return a.triagePriority - b.triagePriority;
+        return (b.size || 0) - (a.size || 0);
+      })
+      .map((entry) => entry.stream);
 
     const instantCount = streams.filter((stream) => stream?.meta?.cached).length;
     if (instantCount > 0) {

@@ -14,6 +14,7 @@ UsenetStreamer is a Stremio addon that bridges a Usenet indexer manager (Prowlar
 - Fallback failure clip when NZBDav cannot deliver media.
 - Optional shared-secret gate so only authorized manifest/stream requests succeed.
 - Flags already-downloaded NZBs as ⚡ Instant so you know which streams will start immediately.
+- Optional NNTP-backed NZB health triage to surface playable releases first and highlight broken uploads.
 
 ## Getting Started
 
@@ -71,6 +72,7 @@ When `ADDON_SHARED_SECRET` is set, every request must include the token as the f
 - `ADDON_BASE_URL`, `ADDON_SHARED_SECRET`
 - `NZBDAV_CATEGORY`
 - `NZBDAV_HISTORY_FETCH_LIMIT`, `NZBDAV_CACHE_TTL_MINUTES`
+- `NZB_TRIAGE_*`
 
 `INDEXER_MANAGER` defaults to `prowlarr`. Set it to `nzbhydra` to target an NZBHydra instance.
 
@@ -85,6 +87,8 @@ When `ADDON_SHARED_SECRET` is set, every request must include the token as the f
 `NZBDAV_CATEGORY` optionally overrides the target NZBDav categories. When set (e.g. `Stremio`), movie jobs are queued to `Stremio_MOVIE`, series to `Stremio_TV`, and everything else to `Stremio_DEFAULT`. Leave unset to keep the per-type categories (`NZBDAV_CATEGORY_MOVIES`, `NZBDAV_CATEGORY_SERIES`, etc.).
 
 `NZBDAV_HISTORY_FETCH_LIMIT` controls how many completed NZB history entries we scan when looking for instant playback matches (default 400, capped at 500). `NZBDAV_CACHE_TTL_MINUTES` controls how long stream metadata stays cached in memory (default 1440 minutes = 24 hours). Set `NZBDAV_CACHE_TTL_MINUTES=0` to disable expiration entirely if you want previously mounted NZBs to remain marked as ⚡ Instant until the process restarts.
+
+`NZB_TRIAGE_*` toggles the optional NNTP-backed health check. Enable it with `NZB_TRIAGE_ENABLED=true`, provide NNTP credentials (`NZB_TRIAGE_NNTP_HOST`, `NZB_TRIAGE_NNTP_USER`, etc.), and fine-tune the time budget, candidate count, download concurrency, and preferred release size. When enabled, the addon downloads a small batch of candidate NZBs, samples the archive headers over NNTP, and moves verified releases to the top of the stream list while flagging broken uploads.
 
 
 See `.env.example` for the authoritative list.
