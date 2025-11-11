@@ -8,6 +8,10 @@
   const manifestLink = document.getElementById('manifestLink');
   const manifestDescription = document.getElementById('manifestDescription');
   const saveStatus = document.getElementById('saveStatus');
+  const copyManifestButton = document.getElementById('copyManifest');
+  const copyManifestStatus = document.getElementById('copyManifestStatus');
+
+  let copyStatusTimer = null;
 
   let runtimeEnvPath = null;
 
@@ -177,10 +181,60 @@
     if (!url) {
       manifestLink.textContent = 'Not configured';
       manifestLink.removeAttribute('href');
+      setCopyButtonState(false);
+      if (copyManifestStatus) copyManifestStatus.textContent = '';
       return;
     }
     manifestLink.textContent = url;
     manifestLink.href = url;
+    setCopyButtonState(true);
+    if (copyManifestStatus) copyManifestStatus.textContent = '';
+  }
+
+  function setCopyButtonState(enabled) {
+    if (!copyManifestButton) return;
+    copyManifestButton.disabled = !enabled;
+    if (!enabled) {
+      if (copyStatusTimer) {
+        clearTimeout(copyStatusTimer);
+        copyStatusTimer = null;
+      }
+      copyManifestStatus.textContent = '';
+    }
+  }
+
+  async function copyManifestUrl() {
+    if (!manifestLink || !manifestLink.href || copyManifestButton.disabled) return;
+    const url = manifestLink.href;
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(url);
+      } else {
+        const textarea = document.createElement('textarea');
+        textarea.value = url;
+        textarea.setAttribute('readonly', '');
+        textarea.style.position = 'absolute';
+        textarea.style.left = '-9999px';
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+      }
+      showCopyFeedback('Copied!');
+    } catch (error) {
+      console.error('Failed to copy manifest URL', error);
+      showCopyFeedback('Copy failed');
+    }
+  }
+
+  function showCopyFeedback(message) {
+    if (!copyManifestStatus) return;
+    copyManifestStatus.textContent = message;
+    if (copyStatusTimer) clearTimeout(copyStatusTimer);
+    copyStatusTimer = setTimeout(() => {
+      copyManifestStatus.textContent = '';
+      copyStatusTimer = null;
+    }, 2500);
   }
 
   async function saveConfiguration(event) {
@@ -190,11 +244,18 @@
     try {
       markSaving(true);
       const values = collectFormValues();
-      await apiRequest('/admin/api/config', {
+      const result = await apiRequest('/admin/api/config', {
         method: 'POST',
         body: JSON.stringify({ values }),
       });
-      saveStatus.textContent = 'Configuration saved. The addon will restart in a few seconds...';
+      const manifestUrl = result?.manifestUrl || manifestLink?.href || '';
+      if (manifestUrl) updateManifestLink(manifestUrl);
+      const statusUrl = manifestUrl || manifestLink?.textContent || '';
+      if (statusUrl) {
+        saveStatus.textContent = `Manifest URL: ${statusUrl} — addon will restart in a few seconds...`;
+      } else {
+        saveStatus.textContent = 'Configuration saved. The addon will restart in a few seconds...';
+      }
     } catch (error) {
       saveStatus.textContent = `Error: ${error.message}`;
     } finally {
@@ -219,6 +280,10 @@
   testButtons.forEach((button) => {
     button.addEventListener('click', () => runConnectionTest(button));
   });
+
+  if (copyManifestButton) {
+    copyManifestButton.addEventListener('click', copyManifestUrl);
+  }
 
   const pathToken = extractTokenFromPath();
   if (pathToken) {

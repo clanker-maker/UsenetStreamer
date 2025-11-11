@@ -11,14 +11,14 @@ const RAR5_SIGNATURE = Buffer.from([0x52, 0x61, 0x72, 0x21, 0x1A, 0x07, 0x01, 0x
 const DEFAULT_OPTIONS = {
   archiveDirs: [],
   nntpConfig: null,
-  statTimeoutMs: 1500,
-  fetchTimeoutMs: 4000,
+  statTimeoutMs: 4000,
+  fetchTimeoutMs: 10000,
   maxDecodedBytes: 16 * 1024,
   nntpMaxConnections: 60,
   reuseNntpPool: true,
   nntpKeepAliveMs: 120000 ,
   maxParallelNzbs: Number.POSITIVE_INFINITY,
-  statSampleCount: 2,
+  statSampleCount: 1,
   archiveSampleCount: 1,
 };
 
