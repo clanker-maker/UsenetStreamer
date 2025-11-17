@@ -52,8 +52,6 @@ Note the `uid=` and `gid=` values and reuse them anywhere this guide mentions `P
 ```bash
 mkdir -p ~/usenetstack/{prowlarr,nzbdav,usenetstreamer}
 cd ~/usenetstack
-openssl rand -hex 16 | tr -d '\n' > .shared-secret
-cat .shared-secret   # copy this for later
 ```
 
 ## 4. Create `docker-compose.yml`
@@ -97,7 +95,7 @@ services:
     ports:
       - "7000:7000"
     environment:
-      ADDON_SHARED_SECRET: ${ADDON_SECRET:?set ADDON_SECRET}
+      ADDON_SHARED_SECRET: Enter-some-random-string-here-as-toekn
       ADDON_BASE_URL: https://your-duckdns-subdomain.duckdns.org/
       INDEXER_MANAGER_URL: http://prowlarr:9696
       NZBDAV_URL: http://nzbdav:3000
