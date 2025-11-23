@@ -31,6 +31,7 @@ const { parseReleaseMetadata, LANGUAGE_FILTERS, LANGUAGE_SYNONYMS } = require('.
 const cache = require('./src/cache');
 const { ensureSharedSecret } = require('./src/middleware/auth');
 const newznabService = require('./src/services/newznab');
+const easynewsService = require('./src/services/easynews');
 const { toFiniteNumber, toPositiveInt, toBoolean, parseCommaList, parsePathList, normalizeSortMode, resolvePreferredLanguages, toSizeBytesFromGb, collectConfigValues, computeManifestUrl, stripTrailingSlashes, decodeBase64Value } = require('./src/utils/config');
 const { normalizeReleaseTitle, parseRequestedEpisode, isVideoFileName, fileMatchesEpisode, normalizeNzbdavPath, inferMimeType, normalizeIndexerToken, nzbMatchesIndexer, cleanSpecialSearchTitle } = require('./src/utils/parsers');
 const { sleep, annotateNzbResult, applyMaxSizeFilter, prepareSortedResults, getPreferredLanguageMatch, getPreferredLanguageMatches, triageStatusRank, buildTriageTitleMap, prioritizeTriageCandidates, triageDecisionsMatchStatuses, sanitizeDecisionForCache, serializeFinalNzbResults, restoreFinalNzbResults, safeStat } = require('./src/utils/helpers');
@@ -579,6 +580,8 @@ function rebuildRuntimeConfig({ log = true } = {}) {
   };
 
   maybePrewarmSharedNntpPool();
+  const resolvedAddonBase = ADDON_BASE_URL || `http://${SERVER_HOST}:${currentPort}`;
+  easynewsService.reloadConfig({ addonBaseUrl: resolvedAddonBase, sharedSecret: ADDON_SHARED_SECRET });
 
   const portChanged = previousPort !== undefined && previousPort !== currentPort;
   if (log) {
@@ -649,6 +652,9 @@ const ADMIN_CONFIG_KEYS = [
   'NZB_TRIAGE_ARCHIVE_DIRS',
   'NZB_TRIAGE_REUSE_POOL',
   'NZB_TRIAGE_NNTP_KEEP_ALIVE_MS',
+  'EASYNEWS_ENABLED',
+  'EASYNEWS_USERNAME',
+  'EASYNEWS_PASSWORD',
 ];
 
 ADMIN_CONFIG_KEYS.push('NEWZNAB_ENABLED', 'NEWZNAB_FILTER_NZB_ONLY', ...NEWZNAB_NUMBERED_KEYS);
@@ -925,8 +931,9 @@ async function streamHandler(req, res) {
   }
 
   const isSpecialRequest = Boolean(incomingSpecialId);
+  const requestLacksIdentifiers = !incomingImdbId && !incomingTvdbId;
 
-  if (!incomingImdbId && !incomingTvdbId && !isSpecialRequest) {
+  if (requestLacksIdentifiers && !isSpecialRequest) {
     res.status(400).json({ error: `Unsupported ID prefix for indexer manager search: ${baseIdentifier}` });
     return;
   }
@@ -1055,7 +1062,9 @@ async function streamHandler(req, res) {
       (type === 'series' && !hasTvdbInQuery) ||
       (type === 'movie' && !hasTmdbInQuery)
     );
-    const needsCinemeta = needsStrictSeriesTvdb || needsRelaxedMetadata;
+    const needsCinemeta = needsStrictSeriesTvdb
+      || needsRelaxedMetadata
+      || easynewsService.requiresCinemetaMetadata(isSpecialRequest);
     if (needsCinemeta) {
       const cinemetaPath = type === 'series' ? `series/${baseIdentifier}.json` : `${type}/${baseIdentifier}.json`;
       const cinemetaUrl = `${CINEMETA_URL}/${cinemetaPath}`;
@@ -1253,6 +1262,8 @@ async function streamHandler(req, res) {
       }
 
       const textQueryParts = [];
+      let easynewsSearchParams = null;
+      let textQueryFallbackValue = null;
       if (movieTitle) {
         textQueryParts.push(movieTitle);
       }
@@ -1262,19 +1273,19 @@ async function streamHandler(req, res) {
         textQueryParts.push(`S${String(seasonNum).padStart(2, '0')}E${String(episodeNum).padStart(2, '0')}`);
       }
 
-    const shouldForceTextSearch = isSpecialRequest;
+      const shouldForceTextSearch = isSpecialRequest;
       const shouldAddTextSearch = shouldForceTextSearch || (!INDEXER_MANAGER_STRICT_ID_MATCH && !incomingTvdbId);
 
       if (shouldAddTextSearch) {
         const fallbackIdentifier = incomingImdbId || baseIdentifier;
         const textQueryCandidate = textQueryParts.join(' ').trim();
-        const textQueryFallback = (textQueryCandidate || fallbackIdentifier).trim();
-        if (textQueryFallback) {
-          const addedTextPlan = addPlan('search', { rawQuery: textQueryFallback });
+        textQueryFallbackValue = (textQueryCandidate || fallbackIdentifier).trim();
+        if (textQueryFallbackValue) {
+          const addedTextPlan = addPlan('search', { rawQuery: textQueryFallbackValue });
           if (addedTextPlan) {
-            console.log(`${INDEXER_LOG_PREFIX} Added text search plan`, { query: textQueryFallback });
+            console.log(`${INDEXER_LOG_PREFIX} Added text search plan`, { query: textQueryFallbackValue });
           } else {
-            console.log(`${INDEXER_LOG_PREFIX} Text search plan already present`, { query: textQueryFallback });
+            console.log(`${INDEXER_LOG_PREFIX} Text search plan already present`, { query: textQueryFallbackValue });
           }
         } else {
           console.log(`${INDEXER_LOG_PREFIX} Skipping text search plan; insufficient metadata`);
@@ -1288,6 +1299,35 @@ async function streamHandler(req, res) {
         console.log(`${INDEXER_LOG_PREFIX} Using configured indexers`, INDEXER_MANAGER_INDEXERS);
       } else {
         console.log(`${INDEXER_LOG_PREFIX} Using manager default indexer selection`);
+      }
+
+      if (easynewsService.isEasynewsEnabled()) {
+        const easynewsStrictMode = !isSpecialRequest && (type === 'movie' || type === 'series');
+        let easynewsRawQuery = null;
+        if (isSpecialRequest) {
+          easynewsRawQuery = (specialMetadataResult?.title || movieTitle || baseIdentifier || '').trim();
+        } else if (easynewsStrictMode) {
+          easynewsRawQuery = (textQueryParts.join(' ').trim() || movieTitle || '').trim();
+        } else {
+          easynewsRawQuery = (textQueryParts.join(' ').trim() || movieTitle || '').trim();
+        }
+        if (!easynewsRawQuery && textQueryFallbackValue) {
+          easynewsRawQuery = textQueryFallbackValue;
+        }
+        if (!easynewsRawQuery && baseIdentifier) {
+          easynewsRawQuery = baseIdentifier;
+        }
+        if (easynewsRawQuery) {
+          easynewsSearchParams = {
+            rawQuery: easynewsRawQuery,
+            fallbackQuery: textQueryFallbackValue || baseIdentifier || movieTitle || '',
+            year: type === 'movie' ? releaseYear : null,
+            season: type === 'series' ? seasonNum : null,
+            episode: type === 'series' ? episodeNum : null,
+            strictMode: easynewsStrictMode,
+            specialTextOnly: Boolean(isSpecialRequest || requestLacksIdentifiers),
+          };
+        }
       }
 
       const deriveResultKey = (result) => {
@@ -1471,9 +1511,35 @@ async function streamHandler(req, res) {
         })
         .map((result) => ({ ...result, _sourceType: 'nzb' }));
 
+      if (easynewsSearchParams) {
+        try {
+          const easynewsResults = await easynewsService.searchEasynews(easynewsSearchParams);
+          if (Array.isArray(easynewsResults) && easynewsResults.length > 0) {
+            console.log('[EASYNEWS] Added results', { count: easynewsResults.length, query: easynewsSearchParams.rawQuery });
+            easynewsResults.forEach((item) => {
+              const enriched = {
+                ...item,
+                _sourceType: 'easynews',
+                indexer: item.indexer || 'Easynews',
+                indexerId: item.indexerId || 'easynews',
+              };
+              finalNzbResults.push(enriched);
+              triageDecisions.set(enriched.downloadUrl, {
+                status: 'verified',
+                source: 'easynews',
+                verifiedAt: Date.now(),
+              });
+            });
+            triageTitleMap = buildTriageTitleMap(triageDecisions);
+          }
+        } catch (easynewsError) {
+          console.warn('[EASYNEWS] Search failed', easynewsError.message);
+        }
+      }
+
       finalNzbResults = finalNzbResults.map((result, index) => annotateNzbResult(result, index));
 
-  console.log(`${INDEXER_LOG_PREFIX} Final NZB selection: ${finalNzbResults.length} results`);
+      console.log(`${INDEXER_LOG_PREFIX} Final NZB selection: ${finalNzbResults.length} results`);
     }
 
     const effectiveMaxSizeBytes = (() => {
@@ -1581,7 +1647,7 @@ async function streamHandler(req, res) {
       return false;
     };
     const triageCandidatesToRun = triageEligibleResults.filter((candidate) => !candidateHasConclusiveDecision(candidate));
-    const shouldSkipTriageForRequest = !incomingImdbId && !incomingTvdbId;
+    const shouldSkipTriageForRequest = requestLacksIdentifiers;
     const shouldAttemptTriage = triageCandidatesToRun.length > 0 && !requestedDisable && !shouldSkipTriageForRequest && (requestedEnable || TRIAGE_ENABLED);
     let triageOutcome = null;
     let triageCompleteForCache = !shouldAttemptTriage;
@@ -1762,6 +1828,8 @@ async function streamHandler(req, res) {
         if (result.guid) baseParams.set('guid', result.guid);
         if (result.size) baseParams.set('size', String(result.size));
         if (result.title) baseParams.set('title', result.title);
+        if (result.easynewsPayload) baseParams.set('easynewsPayload', result.easynewsPayload);
+        if (result._sourceType) baseParams.set('sourceType', result._sourceType);
 
         const cacheKey = nzbdavService.buildNzbdavCacheKey(result.downloadUrl, categoryForType, requestedEpisode);
         // Cache entries are managed internally by the cache module
@@ -1992,8 +2060,32 @@ async function streamHandler(req, res) {
   app.get(route, streamHandler);
 });
 
+async function handleEasynewsNzbDownload(req, res) {
+  if (!easynewsService.isEasynewsEnabled()) {
+    res.status(503).json({ error: 'Easynews integration is disabled' });
+    return;
+  }
+  const payload = typeof req.query.payload === 'string' ? req.query.payload : null;
+  if (!payload) {
+    res.status(400).json({ error: 'Missing payload parameter' });
+    return;
+  }
+  try {
+    const nzbData = await easynewsService.downloadEasynewsNzb(payload);
+    res.setHeader('Content-Type', nzbData.contentType || 'application/x-nzb+xml');
+    res.setHeader('Content-Disposition', `attachment; filename="${nzbData.fileName || 'easynews.nzb'}"`);
+    res.status(200).send(nzbData.buffer);
+  } catch (error) {
+    const statusCode = /credential|unauthorized|forbidden/i.test(error.message || '') ? 401 : 502;
+    console.warn('[EASYNEWS] NZB download failed', error.message || error);
+    res.status(statusCode).json({ error: error.message || 'Unable to fetch Easynews NZB' });
+  }
+}
+
 async function handleNzbdavStream(req, res) {
   const { downloadUrl, type = 'movie', id = '', title = 'NZB Stream' } = req.query;
+  const easynewsPayload = typeof req.query.easynewsPayload === 'string' ? req.query.easynewsPayload : null;
+  const declaredSize = Number(req.query.size);
 
   if (!downloadUrl) {
     res.status(400).json({ error: 'downloadUrl query parameter is required' });
@@ -2012,8 +2104,44 @@ async function handleNzbdavStream(req, res) {
         }
       : null;
 
+    let inlineEasynewsEntry = null;
+    if (!existingSlotHint && easynewsPayload) {
+      try {
+        const easynewsNzb = await easynewsService.downloadEasynewsNzb(easynewsPayload);
+        const nzbString = easynewsNzb.buffer.toString('utf8');
+        cache.cacheVerifiedNzbPayload(downloadUrl, nzbString, {
+          title,
+          size: Number.isFinite(declaredSize) ? declaredSize : undefined,
+          fileName: easynewsNzb.fileName,
+        });
+        inlineEasynewsEntry = cache.getVerifiedNzbCacheEntry(downloadUrl);
+        if (!inlineEasynewsEntry) {
+          inlineEasynewsEntry = {
+            payloadBuffer: Buffer.from(nzbString, 'utf8'),
+            metadata: {
+              title,
+              size: Number.isFinite(declaredSize) ? declaredSize : undefined,
+              fileName: easynewsNzb.fileName,
+            }
+          };
+        }
+        console.log('[EASYNEWS] Downloaded NZB payload for inline queueing');
+      } catch (easynewsError) {
+        const message = easynewsError?.message || easynewsError || 'unknown error';
+        console.warn('[EASYNEWS] Failed to fetch NZB payload:', message);
+        throw new Error(`Unable to download Easynews NZB payload: ${message}`);
+      }
+    }
+
     const streamData = await cache.getOrCreateNzbdavStream(cacheKey, () =>
-      nzbdavService.buildNzbdavStream({ downloadUrl, category, title, requestedEpisode, existingSlot: existingSlotHint })
+      nzbdavService.buildNzbdavStream({
+        downloadUrl,
+        category,
+        title,
+        requestedEpisode,
+        existingSlot: existingSlotHint,
+        inlineCachedEntry: inlineEasynewsEntry,
+      })
     );
 
     if ((req.method || 'GET').toUpperCase() === 'HEAD') {
@@ -2058,6 +2186,10 @@ async function handleNzbdavStream(req, res) {
 ['/:token/nzb/stream', '/nzb/stream'].forEach((route) => {
   app.get(route, handleNzbdavStream);
   app.head(route, handleNzbdavStream);
+});
+
+['/:token/easynews/nzb', '/easynews/nzb'].forEach((route) => {
+  app.get(route, handleEasynewsNzbDownload);
 });
 
 function startHttpServer() {

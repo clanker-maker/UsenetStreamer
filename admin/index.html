@@ -114,6 +114,24 @@
         </section>
 
         <section class="group">
+          <h3>Built-in Easynews Indexer</h3>
+          <p class="hint">Provide your Easynews credentials to let the addon search Easynews directly (no external bridge required). Only the username and password are needed.</p>
+          <div class="field-grid">
+            <label class="checkbox">
+              <input name="EASYNEWS_ENABLED" type="checkbox" />
+              <span>Enable Easynews Integration</span>
+              <span class="field-hint">Adds Easynews as a first-class indexer. Results skip health checks but are marked ✅ by default.</span>
+            </label>
+            <label>Easynews Username
+              <input name="EASYNEWS_USERNAME" type="text" autocomplete="username" />
+            </label>
+            <label>Easynews Password
+              <input name="EASYNEWS_PASSWORD" type="password" autocomplete="current-password" />
+            </label>
+          </div>
+        </section>
+
+        <section class="group">
           <h3>Result Sorting &amp; Filters</h3>
           <div class="field-grid">
             <label>Sorting Mode
@@ -346,7 +364,7 @@
           <button type="submit" class="primary">Save Changes</button>
           <span id="saveStatus" class="status-message"></span>
           <p id="sourceGuardNotice" class="warning hidden">
-            Select a manager or enable at least one direct Newznab indexer before saving.
+            Select a manager, enable Easynews, or turn on at least one direct Newznab indexer before saving.
           </p>
         </div>
       </form>

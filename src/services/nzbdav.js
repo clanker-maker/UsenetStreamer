@@ -460,7 +460,7 @@ async function findBestVideoFile({ category, jobName, requestedEpisode }) {
   return bestEpisodeMatch || bestMatch;
 }
 
-async function buildNzbdavStream({ downloadUrl, category, title, requestedEpisode, existingSlot = null }) {
+async function buildNzbdavStream({ downloadUrl, category, title, requestedEpisode, existingSlot = null, inlineCachedEntry = null }) {
   let reuseError = null;
   const attempts = [];
   if (existingSlot?.nzoId) {
@@ -483,7 +483,7 @@ async function buildNzbdavStream({ downloadUrl, category, title, requestedEpisod
         slotJobName = slot?.job_name || slot?.JobName || slot?.name || slot?.Name || existingSlot?.jobName || title;
         console.log(`[NZBDAV] Reusing completed NZB ${slotJobName} (${nzoId})`);
       } else {
-        const cachedNzbEntry = cache.getVerifiedNzbCacheEntry(downloadUrl);
+        const cachedNzbEntry = inlineCachedEntry || cache.getVerifiedNzbCacheEntry(downloadUrl);
         if (cachedNzbEntry) {
           console.log('[CACHE] Using verified NZB payload', { downloadUrl });
         }

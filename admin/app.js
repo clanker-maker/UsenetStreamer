@@ -38,6 +38,9 @@
   const addNewznabButton = document.getElementById('addNewznabIndexer');
   const newznabTestSearchBlock = document.getElementById('newznab-test-search');
   const newznabTestButton = configForm.querySelector('button[data-test="newznab"]');
+  const easynewsToggle = configForm.querySelector('input[name="EASYNEWS_ENABLED"]');
+  const easynewsUserInput = configForm.querySelector('input[name="EASYNEWS_USERNAME"]');
+  const easynewsPassInput = configForm.querySelector('input[name="EASYNEWS_PASSWORD"]');
   let saveInProgress = false;
 
   function getStoredToken() {
@@ -242,8 +245,15 @@
     return value !== 'none';
   }
 
+  function hasEasynewsConfigured() {
+    if (!easynewsToggle || !easynewsToggle.checked) return false;
+    const user = easynewsUserInput?.value?.trim();
+    const pass = easynewsPassInput?.value?.trim();
+    return Boolean(user && pass);
+  }
+
   function hasActiveIndexerSource() {
-    return hasManagerConfigured() || hasEnabledNewznabRows();
+    return hasManagerConfigured() || hasEnabledNewznabRows() || hasEasynewsConfigured();
   }
 
   function syncSaveGuard() {
@@ -1008,6 +1018,16 @@
     managerSelect.addEventListener('change', () => {
       syncManagerControls();
     });
+  }
+
+  if (easynewsToggle) {
+    easynewsToggle.addEventListener('change', syncSaveGuard);
+  }
+  if (easynewsUserInput) {
+    easynewsUserInput.addEventListener('input', syncSaveGuard);
+  }
+  if (easynewsPassInput) {
+    easynewsPassInput.addEventListener('input', syncSaveGuard);
   }
 
   const pathToken = extractTokenFromPath();

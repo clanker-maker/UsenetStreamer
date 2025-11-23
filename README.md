@@ -55,6 +55,11 @@
 - Completed NZBDav jobs are recognized automatically and surfaced with a ⚡ tag.
 - Instant streams are floated to the top of the list so you can start watching immediately.
 
+### 🔌 Built-in Easynews Indexer
+- Toggle Easynews in the admin panel, drop in your username/password, and get native search results without running the standalone proxy.
+- Movies/series use strict Cinemeta matching for precise hits, while external text-only addons stay in loose mode.
+- Easynews results skip triage (they're treated as ✅ verified) but still flow through the usual dedupe/sorting pipeline.
+
 ### 🩺 NNTP Health Checks
 - Optional triage downloads a handful of NZBs, samples archives over NNTP, and flags broken uploads before Stremio sees them.
 - Decisions are cached per download URL and per normalized title, so later requests inherit health verdicts instantly.
@@ -169,6 +174,7 @@ This allows forks or containerized deployments to update upstream code without l
 - `ADDON_BASE_URL` (must be HTTPS), `ADDON_SHARED_SECRET` (required for security).
 - `NZB_SORT_MODE` (`quality_then_size` or `language_quality_size`), `NZB_PREFERRED_LANGUAGE` (comma-separated to prioritize multiple languages), `NZB_MAX_RESULT_SIZE_GB` (defaults to 30 GB, set 0 for no cap), `NZB_DEDUP_ENABLED` (collapse duplicate releases by title/indexer/size), `NZB_ALLOWED_RESOLUTIONS` (whitelist of qualities to keep), `NZB_RESOLUTION_LIMIT_PER_QUALITY` (optional uniform cap; e.g. `4` keeps at most four streams for each enabled resolution).
 - `NZBDAV_URL`, `NZBDAV_API_KEY`, `NZBDAV_WEBDAV_URL`, `NZBDAV_WEBDAV_USER`, `NZBDAV_WEBDAV_PASS`, `NZBDAV_CATEGORY*`.
+- `EASYNEWS_ENABLED`, `EASYNEWS_USERNAME`, `EASYNEWS_PASSWORD` — enable the built-in Easynews search bridge (text-only search with optional strict matching).
 - `NZBDAV_HISTORY_FETCH_LIMIT`, `NZBDAV_CACHE_TTL_MINUTES` (controls instant detection cache).
 - `NZB_TRIAGE_*` for NNTP health checks (host, port, user/pass, timeouts, candidate counts, reuse pool, etc.).
 
