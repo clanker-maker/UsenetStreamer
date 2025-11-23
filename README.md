@@ -39,6 +39,16 @@
 
 ## ✨ Feature Highlights
 
+### 🆕 Recent Enhancements (1.3.x → 1.4.x)
+- **Smarter dedupe pipeline** — collapses near-identical releases using normalized titles, indexer IDs, and sizes, so stream rows stay tidy even with aggressive multi-indexer searches.
+- **Multi-language preferences** — pick several preferred audio languages in the admin panel; the sorter surfaces hits with 🌐 badges and falls back gracefully when none match.
+- **Two-tier sorting polish** — quality/size ordering got revamped so languages, instant hits, and per-quality limits all blend without bouncing streams around between refreshes.
+- **Per-resolution caps** — optionally limit the number of 4K/1080p/etc. streams kept before the next tier is considered, preventing walls of similar releases.
+- **Retry-friendly triage** — if every NZB in the first pass fails health checks, the next manifest request transparently samples fresh candidates so you’re not stuck with a dead cache.
+- **Built-in Easynews bridge** — native username/password fields expose Easynews as another indexer, no Flask proxy needed, and streams skip NNTP triage while staying marked ✅.
+- **Curated Newznab presets** — enable the new built-in indexers list to bootstrap direct APIs quickly (paid flag doubles as health-check eligibility).
+- **Cleaner stream formatting** — manifest responses now display consistent title, badge, and language lines across desktop/mobile Stremio.
+
 ### 🚀 Performance & Caching
 - Parallel queries to Prowlarr or NZBHydra with automatic deduplication.
 - Two-tier cache (Stremio responses + verified NZBs) to keep repeat requests instant.
