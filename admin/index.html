@@ -129,6 +129,10 @@
               <input name="EASYNEWS_PASSWORD" type="password" autocomplete="current-password" />
             </label>
           </div>
+          <div class="inline-actions">
+            <button type="button" class="secondary" data-test="easynews">Test Easynews Login</button>
+            <span class="status-message" data-test-status="easynews"></span>
+          </div>
         </section>
 
         <section class="group">
@@ -204,6 +208,13 @@
               <span>
                 Hide duplicate releases
                 <span class="field-hint">Collapses identical matches (same title/indexer/size). Disable to inspect every result.</span>
+              </span>
+            </label>
+            <label class="checkbox">
+              <input name="NZB_HIDE_BLOCKED_RESULTS" type="checkbox" />
+              <span>
+                Hide blocked NZBs
+                <span class="field-hint">Blocked releases already show a red 🚫 tag; enable this to remove them entirely from manifests.</span>
               </span>
             </label>
           </div>

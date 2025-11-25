@@ -187,6 +187,12 @@ adminApiRouter.post('/test-connections', async (req, res) => {
       case 'newznab-search':
         message = await testNewznabSearch(values);
         break;
+      case 'easynews': {
+        const username = values?.EASYNEWS_USERNAME || '';
+        const password = values?.EASYNEWS_PASSWORD || '';
+        message = await easynewsService.testEasynewsCredentials({ username, password });
+        break;
+      }
       default:
         res.status(400).json({ error: `Unknown test type: ${type}` });
         return;
@@ -435,6 +441,7 @@ function buildTriageNntpConfig() {
 let INDEXER_SORT_MODE = normalizeSortMode(process.env.NZB_SORT_MODE, 'quality_then_size');
 let INDEXER_PREFERRED_LANGUAGES = resolvePreferredLanguages(process.env.NZB_PREFERRED_LANGUAGE, []);
 let INDEXER_DEDUP_ENABLED = toBoolean(process.env.NZB_DEDUP_ENABLED, true);
+let INDEXER_HIDE_BLOCKED_RESULTS = toBoolean(process.env.NZB_HIDE_BLOCKED_RESULTS, false);
 let INDEXER_MAX_RESULT_SIZE_BYTES = toSizeBytesFromGb(
   process.env.NZB_MAX_RESULT_SIZE_GB && process.env.NZB_MAX_RESULT_SIZE_GB !== ''
     ? process.env.NZB_MAX_RESULT_SIZE_GB
@@ -542,6 +549,7 @@ function rebuildRuntimeConfig({ log = true } = {}) {
   INDEXER_SORT_MODE = normalizeSortMode(process.env.NZB_SORT_MODE, 'quality_then_size');
   INDEXER_PREFERRED_LANGUAGES = resolvePreferredLanguages(process.env.NZB_PREFERRED_LANGUAGE, []);
   INDEXER_DEDUP_ENABLED = toBoolean(process.env.NZB_DEDUP_ENABLED, true);
+  INDEXER_HIDE_BLOCKED_RESULTS = toBoolean(process.env.NZB_HIDE_BLOCKED_RESULTS, false);
   INDEXER_MAX_RESULT_SIZE_BYTES = toSizeBytesFromGb(
     process.env.NZB_MAX_RESULT_SIZE_GB && process.env.NZB_MAX_RESULT_SIZE_GB !== ''
       ? process.env.NZB_MAX_RESULT_SIZE_GB
@@ -619,6 +627,7 @@ const ADMIN_CONFIG_KEYS = [
   'NZB_PREFERRED_LANGUAGE',
   'NZB_MAX_RESULT_SIZE_GB',
   'NZB_DEDUP_ENABLED',
+  'NZB_HIDE_BLOCKED_RESULTS',
   'NZB_ALLOWED_RESOLUTIONS',
   'NZB_RESOLUTION_LIMIT_PER_QUALITY',
   'NZBDAV_URL',
@@ -1841,6 +1850,9 @@ async function streamHandler(req, res) {
         const triageApplied = Boolean(directTriageInfo);
         const triageDerivedFromTitle = Boolean(!directTriageInfo && fallbackAllowed && fallbackTriageInfo);
         const triageStatus = triageInfo?.status || (triageApplied ? 'unknown' : 'not-run');
+        if (INDEXER_HIDE_BLOCKED_RESULTS && triageStatus === 'blocked') {
+          return;
+        }
         let triagePriority = 1;
         let triageTag = null;
 

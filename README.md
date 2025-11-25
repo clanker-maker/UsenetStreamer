@@ -96,10 +96,13 @@
 ### Docker (recommended)
 
 ```bash
+mkdir -p ~/usenetstreamer-config
 docker run -d --restart unless-stopped \
   --name usenetstreamer \
   -p 7000:7000 \
   -e ADDON_SHARED_SECRET=super-secret-token \
+  -e CONFIG_DIR=/data/config \
+  -v ~/usenetstreamer-config:/data/config \
   ghcr.io/sanket9225/usenetstreamer:latest
 ```
 
@@ -115,9 +118,12 @@ services:
       - "7000:7000"
     environment:
       ADDON_SHARED_SECRET: super-secret-token
+      CONFIG_DIR: /data/config
+    volumes:
+      - ./usenetstreamer-config:/data/config
 ```
 
-Then browse to `https://your-domain/super-secret-token/admin/` to enter your credentials. The container ships with Node 20, exposes port 7000, and supports both `linux/amd64` and `linux/arm64` thanks to `buildx`.
+Then browse to `https://your-domain/super-secret-token/admin/` to enter your credentials. The `CONFIG_DIR` variable tells the addon to store `runtime-env.json` under the mounted path so your admin settings survive container recreations. The container ships with Node 20, exposes port 7000, and supports both `linux/amd64` and `linux/arm64` thanks to `buildx`.
 
 ### Source installation
 

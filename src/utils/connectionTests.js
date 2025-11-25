@@ -106,6 +106,11 @@ async function testNzbdavConnection(values) {
   if (!baseUrl) throw new Error('NZBDav URL is required');
   const apiKey = (values?.NZBDAV_API_KEY || '').trim();
   if (!apiKey) throw new Error('NZBDav API key is required');
+  const webdavUrl = sanitizeBaseUrl(values?.NZBDAV_WEBDAV_URL || values?.NZBDAV_URL);
+  const webdavUser = (values?.NZBDAV_WEBDAV_USER || '').trim();
+  const webdavPass = (values?.NZBDAV_WEBDAV_PASS || '').trim();
+  if (!webdavUrl) throw new Error('NZBDav WebDAV URL is required');
+  if (!webdavUser || !webdavPass) throw new Error('NZBDav WebDAV username/password are required');
   const timeout = 8000;
 
   const attempts = [
@@ -156,7 +161,28 @@ async function testNzbdavConnection(values) {
       }
 
       const version = payload?.queue?.version || payload?.version || payload?.server_version || payload?.appVersion;
-      return formatVersionLabel('Connected to NZBDav/SAB API', version);
+      const apiMessage = formatVersionLabel('Connected to NZBDav/SAB API', version);
+
+      const webdavResponse = await axios.request({
+        method: 'HEAD',
+        url: `${webdavUrl}/`,
+        auth: {
+          username: webdavUser,
+          password: webdavPass,
+        },
+        timeout,
+        maxRedirects: 0,
+        validateStatus: () => true,
+      });
+
+      if (webdavResponse.status === 401 || webdavResponse.status === 403) {
+        throw new Error('WebDAV authentication failed: check username/password');
+      }
+      if (webdavResponse.status >= 400) {
+        throw new Error(`WebDAV endpoint returned status ${webdavResponse.status}`);
+      }
+
+      return `${apiMessage}; WebDAV reachable`;
     } catch (error) {
       lastIssue = error;
     }

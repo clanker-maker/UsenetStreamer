@@ -14,6 +14,7 @@ const CONFIG_DIR = (() => {
 })();
 const RUNTIME_ENV_FILE = path.join(CONFIG_DIR, 'runtime-env.json');
 let cachedEnv = null;
+let appliedKeys = new Set();
 
 function ensureConfigDir() {
   if (!fs.existsSync(CONFIG_DIR)) {
@@ -57,9 +58,16 @@ function writeRuntimeEnv(envObject) {
 
 function applyRuntimeEnv() {
   const env = readRuntimeEnv();
+  // Remove any keys we previously applied that are no longer present
+  appliedKeys.forEach((key) => {
+    if (!Object.prototype.hasOwnProperty.call(env, key)) {
+      delete process.env[key];
+    }
+  });
   Object.entries(env).forEach(([key, value]) => {
     process.env[key] = value;
   });
+  appliedKeys = new Set(Object.keys(env));
 }
 
 function updateRuntimeEnv(updates) {

@@ -53,7 +53,7 @@ id
 Note the `uid=` and `gid=` values and reuse them anywhere this guide mentions `PUID`/`PGID`.
 
 ```bash
-mkdir -p ~/usenetstack/{nzbdav,usenetstreamer}
+mkdir -p ~/usenetstack/{nzbdav,usenetstreamer-config}
 mkdir -p ~/usenetstack/prowlarr  # only if you still plan to run Prowlarr/NZBHydra locally
 cd ~/usenetstack
 ```
@@ -89,11 +89,15 @@ services:
       ADDON_BASE_URL: https://your-duckdns-subdomain.duckdns.org/
       NZBDAV_URL: http://nzbdav:3000
       NZBDAV_WEBDAV_URL: http://nzbdav:3000
+      CONFIG_DIR: /data/config
+    volumes:
+      - ./usenetstreamer-config:/data/config
 
 # Notes:
 # - Keep `ADDON_BASE_URL` secret-free; the addon automatically appends `/your-secret/` when serving manifests.
 # - All API keys, Easynews credentials, and direct Newznab endpoints can be entered later via the admin dashboard.
 # - Want to keep Prowlarr/NZBHydra? Add another service block and set `INDEXER_MANAGER_URL`/`API_KEY` env vars.
+# - `CONFIG_DIR` tells UsenetStreamer to persist `runtime-env.json` under `/data/config`, which is the host bind mount you just created.
 ```
 
 ### `.env` for secrets

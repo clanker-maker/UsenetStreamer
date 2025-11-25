@@ -61,14 +61,16 @@ function requiresCinemetaMetadata(isSpecialRequest) {
   return !isSpecialRequest;
 }
 
-function buildAuthConfig() {
-  if (!EASYNEWS_USERNAME || !EASYNEWS_PASSWORD) {
+function buildAuthConfig(override = null) {
+  const username = (override?.username || EASYNEWS_USERNAME || '').trim();
+  const password = (override?.password || EASYNEWS_PASSWORD || '').trim();
+  if (!username || !password) {
     throw new Error('Easynews credentials are not configured');
   }
   return {
     auth: {
-      username: EASYNEWS_USERNAME,
-      password: EASYNEWS_PASSWORD,
+      username,
+      password,
     },
     headers: {
       'User-Agent': 'UsenetStreamer-Easynews/1.0'
@@ -399,7 +401,7 @@ function filterAndMap(jsonData, options) {
   return items;
 }
 
-async function fetchSearchResults(query) {
+async function fetchSearchResults(query, authOverride = null) {
   const params = new URLSearchParams();
   params.set('fly', '2');
   params.set('sb', '1');
@@ -417,7 +419,7 @@ async function fetchSearchResults(query) {
   params.append('fty[]', 'VIDEO');
 
   const requestUrl = `/2.0/search/solr-search/?${params.toString()}`;
-  const response = await httpClient.get(requestUrl, buildAuthConfig());
+  const response = await httpClient.get(requestUrl, buildAuthConfig(authOverride));
   if (response.status === 401 || response.status === 403) {
     throw new Error('Easynews rejected credentials');
   }
@@ -544,10 +546,28 @@ async function downloadEasynewsNzb(payloadToken) {
   };
 }
 
+async function testEasynewsCredentials({ username, password } = {}) {
+  const trimmed = {
+    username: (username || '').trim(),
+    password: (password || '').trim(),
+  };
+  if (!trimmed.username || !trimmed.password) {
+    throw new Error('Easynews username and password are required');
+  }
+  const sampleQuery = 'dune';
+  const data = await fetchSearchResults(sampleQuery, trimmed);
+  const total = Array.isArray(data?.data) ? data.data.length : Number(data?.total) || 0;
+  if (total > 0) {
+    return `Easynews login verified (sample query returned ${total} result${total === 1 ? '' : 's'})`;
+  }
+  return 'Easynews login verified, but sample query returned no results';
+}
+
 module.exports = {
   reloadConfig,
   isEasynewsEnabled,
   requiresCinemetaMetadata,
   searchEasynews,
   downloadEasynewsNzb,
+  testEasynewsCredentials,
 };
