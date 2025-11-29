@@ -59,7 +59,8 @@ const STREAM_HIGH_WATER_MARK = (() => {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 4 * 1024 * 1024;
 })();
 const FAILURE_VIDEO_PATH = path.resolve(__dirname, '../../assets', 'failure_video.mp4');
-const ADDON_VERSION = '1.5.0';
+const VIDEO_TYPE_FAILURE_PATH = path.resolve(__dirname, '../../assets', 'video_type_failure.mp4');
+const ADDON_VERSION = '1.5.1';
 
 function ensureNzbdavConfigured() {
   if (!NZBDAV_URL) {
@@ -510,7 +511,9 @@ async function buildNzbdavStream({ downloadUrl, category, title, requestedEpisod
       });
 
       if (!bestFile) {
-        throw new Error('[NZBDAV] No playable video files found after mounting NZB');
+        const noVideoError = new Error('[NZBDAV] No playable video files found after mounting NZB');
+        noVideoError.code = 'NO_VIDEO_FILES';
+        throw noVideoError;
       }
 
       console.log(`[NZBDAV] Selected file ${bestFile.viewPath} (${bestFile.size} bytes)`);
@@ -660,6 +663,24 @@ async function streamFailureVideo(req, res, failureError) {
 
   console.warn(`[FAILURE STREAM] Serving fallback video due to NZBDav failure: ${failureMessage}`);
   return streamFileResponse(req, res, FAILURE_VIDEO_PATH, emulateHead, 'FAILURE STREAM', stats);
+}
+
+async function streamVideoTypeFailure(req, res, failureError) {
+  const stats = await safeStat(VIDEO_TYPE_FAILURE_PATH);
+  if (!stats || !stats.isFile()) {
+    console.error(`[NO VIDEO STREAM] Failure video not found at ${VIDEO_TYPE_FAILURE_PATH}`);
+    return false;
+  }
+
+  const emulateHead = (req.method || 'GET').toUpperCase() === 'HEAD';
+  const failureMessage = failureError?.failureMessage || failureError?.message || 'NZB did not contain a playable video file';
+
+  if (!res.headersSent) {
+    res.setHeader('X-NZBDav-Failure', failureMessage);
+  }
+
+  console.warn(`[NO VIDEO STREAM] Serving fallback video (no playable files): ${failureMessage}`);
+  return streamFileResponse(req, res, VIDEO_TYPE_FAILURE_PATH, emulateHead, 'NO VIDEO STREAM', stats);
 }
 
 async function proxyNzbdavStream(req, res, viewPath, fileNameHint = '') {
@@ -874,6 +895,7 @@ module.exports = {
   buildNzbdavStream,
   streamFileResponse,
   streamFailureVideo,
+  streamVideoTypeFailure,
   proxyNzbdavStream,
   getWebdavClient,
   reloadConfig,

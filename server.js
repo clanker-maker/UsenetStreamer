@@ -41,7 +41,7 @@ const specialMetadata = require('./src/services/specialMetadata');
 
 const app = express();
 let currentPort = Number(process.env.PORT || 7000);
-const ADDON_VERSION = '1.5.0';
+const ADDON_VERSION = '1.5.1';
 const DEFAULT_ADDON_NAME = 'UsenetStreamer';
 let serverInstance = null;
 const SERVER_HOST = '0.0.0.0';
@@ -2301,6 +2301,17 @@ async function handleNzbdavStream(req, res) {
       const served = await nzbdavService.streamFailureVideo(req, res, error);
       if (!served && !res.headersSent) {
         res.status(502).json({ error: error.failureMessage || error.message });
+      } else if (!served) {
+        res.end();
+      }
+      return;
+    }
+
+    if (error?.code === 'NO_VIDEO_FILES') {
+      console.warn('[NZBDAV] Stream failure due to missing playable files');
+      const served = await nzbdavService.streamVideoTypeFailure(req, res, error);
+      if (!served && !res.headersSent) {
+        res.status(502).json({ error: error.message });
       } else if (!served) {
         res.end();
       }

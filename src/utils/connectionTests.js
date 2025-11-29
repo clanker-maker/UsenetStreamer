@@ -1,4 +1,7 @@
 const axios = require('axios');
+const FormData = require('form-data');
+const fs = require('fs');
+const path = require('path');
 const {
   getNewznabConfigsFromValues,
   filterUsableConfigs,
@@ -28,6 +31,85 @@ function parseBoolean(value) {
 
 const NEWZNAB_DEBUG_ENABLED = (parseBoolean(process.env.DEBUG_NEWZNAB_TEST) || parseBoolean(process.env.DEBUG_NEWZNAB_SEARCH))
   && !parseBoolean(process.env.DISABLE_NEWZNAB_TEST_LOGS);
+
+const TEST_NZB_FILE_NAME = 'Test_Passed_ignore_failure.nzb';
+const TEST_NZB_FILE_PATH = path.resolve(__dirname, '../../assets', TEST_NZB_FILE_NAME);
+let cachedDiagnosticNzbBuffer = null;
+
+async function getDiagnosticNzbBuffer() {
+  if (cachedDiagnosticNzbBuffer) return cachedDiagnosticNzbBuffer;
+  try {
+    cachedDiagnosticNzbBuffer = await fs.promises.readFile(TEST_NZB_FILE_PATH);
+    return cachedDiagnosticNzbBuffer;
+  } catch (error) {
+    throw new Error('Diagnostic NZB asset missing or unreadable');
+  }
+}
+
+function resolveNzbdavTestCategory(values) {
+  const override = (values?.NZBDAV_CATEGORY || '').trim();
+  if (override) return `${override}_MOVIE`;
+  const movieCategory = (values?.NZBDAV_CATEGORY_MOVIES || '').trim();
+  if (movieCategory) return movieCategory;
+  const defaultCategory = (values?.NZBDAV_CATEGORY_DEFAULT || '').trim();
+  if (defaultCategory) return defaultCategory;
+  return 'Movies';
+}
+
+async function verifyNzbdavDiagnosticUpload({ baseUrl, apiKey, category }) {
+  const nzbBuffer = await getDiagnosticNzbBuffer();
+  const form = new FormData();
+  form.append('nzbfile', nzbBuffer, {
+    filename: `UsenetStreamer_Diagnostic_${Date.now()}.nzb`,
+    contentType: 'application/x-nzb+xml',
+  });
+
+  const params = {
+    mode: 'addfile',
+    output: 'json',
+    apikey: apiKey,
+    nzbname: 'UsenetStreamer Diagnostic NZB',
+  };
+  if (category) params.cat = category;
+
+  const headers = {
+    ...form.getHeaders(),
+  };
+  if (apiKey) {
+    headers['x-api-key'] = apiKey;
+  }
+
+  const response = await axios.post(`${baseUrl}/api`, form, {
+    params,
+    headers,
+    timeout: 15000,
+    maxBodyLength: Infinity,
+    maxContentLength: Infinity,
+    validateStatus: () => true,
+  });
+
+  if (response.status === 401 || response.status === 403) {
+    throw new Error('NZBDav rejected API key during diagnostic upload');
+  }
+  if (response.status >= 500) {
+    throw new Error(`NZBDav returned status ${response.status} during diagnostic upload`);
+  }
+
+  const payload = response.data || {};
+  if (payload?.status) {
+    return 'diagnostic NZB accepted';
+  }
+
+  const errorText = (payload?.error || payload?.message || '').toString();
+  if (errorText) {
+    const lowered = errorText.toLowerCase();
+    if (lowered.includes('unsupported') || lowered.includes('archive')) {
+      return errorText;
+    }
+  }
+
+  throw new Error(errorText || 'NZBDav rejected diagnostic NZB upload');
+}
 
 function logNewznabDebug(message, context = null) {
   if (!NEWZNAB_DEBUG_ENABLED) return;
@@ -113,82 +195,41 @@ async function testNzbdavConnection(values) {
   if (!webdavUser || !webdavPass) throw new Error('NZBDav WebDAV username/password are required');
   const timeout = 8000;
 
-  const attempts = [
-    {
-      url: `${baseUrl}/sabnzbd/api`,
-      params: { mode: 'queue', output: 'json', apikey: apiKey },
-    },
-    {
-      url: `${baseUrl}/api`,
-      params: { mode: 'queue', output: 'json', apikey: apiKey },
-    },
-    {
-      url: `${baseUrl}/sabnzbd/api`,
-      params: { mode: 'version', apikey: apiKey },
-    },
-    {
-      url: `${baseUrl}/api`,
-      params: { mode: 'version', apikey: apiKey },
-    },
-  ];
+  try {
+    const diagnosticCategory = resolveNzbdavTestCategory(values);
+    const diagnosticNote = await verifyNzbdavDiagnosticUpload({
+      baseUrl,
+      apiKey,
+      category: diagnosticCategory,
+    });
 
-  let lastIssue = null;
+    const webdavResponse = await axios.request({
+      method: 'HEAD',
+      url: `${webdavUrl}/`,
+      auth: {
+        username: webdavUser,
+        password: webdavPass,
+      },
+      timeout,
+      maxRedirects: 0,
+      validateStatus: () => true,
+    });
 
-  for (const attempt of attempts) {
-    try {
-      const response = await axios.get(attempt.url, {
-        params: attempt.params,
-        timeout,
-        validateStatus: () => true,
-      });
-      if (response.status === 401 || response.status === 403) {
-        throw new Error('Unauthorized: check NZBDav API key');
-      }
-      if (response.status >= 400) {
-        let pathName = '/api';
-        try {
-          pathName = new URL(attempt.url).pathname;
-        } catch (_) {
-          pathName = attempt.url;
-        }
-        lastIssue = new Error(`${pathName} returned status ${response.status}`);
-        continue;
-      }
-
-      const payload = response.data || {};
-      if (payload.status === false || payload?.error) {
-        throw new Error(typeof payload.error === 'string' ? payload.error : 'NZBDav rejected credentials');
-      }
-
-      const version = payload?.queue?.version || payload?.version || payload?.server_version || payload?.appVersion;
-      const apiMessage = formatVersionLabel('Connected to NZBDav/SAB API', version);
-
-      const webdavResponse = await axios.request({
-        method: 'HEAD',
-        url: `${webdavUrl}/`,
-        auth: {
-          username: webdavUser,
-          password: webdavPass,
-        },
-        timeout,
-        maxRedirects: 0,
-        validateStatus: () => true,
-      });
-
-      if (webdavResponse.status === 401 || webdavResponse.status === 403) {
-        throw new Error('WebDAV authentication failed: check username/password');
-      }
-      if (webdavResponse.status >= 400) {
-        throw new Error(`WebDAV endpoint returned status ${webdavResponse.status}`);
-      }
-
-      return `${apiMessage}; WebDAV reachable`;
-    } catch (error) {
-      lastIssue = error;
+    if (webdavResponse.status === 401 || webdavResponse.status === 403) {
+      throw new Error('WebDAV authentication failed: check username/password');
     }
-  }
+    if (webdavResponse.status >= 400) {
+      throw new Error(`WebDAV endpoint returned status ${webdavResponse.status}`);
+    }
 
-  throw lastIssue || new Error('Unable to reach NZBDav');
+    const diagnosticMessage = diagnosticNote
+      ? `Diagnostic NZB upload verified (${diagnosticNote})`
+      : 'Diagnostic NZB upload verified';
+
+    return `WebDAV reachable; ${diagnosticMessage}`;
+  } catch (error) {
+    throw error;
+  }
 }
 
 async function testUsenetConnection(values) {
