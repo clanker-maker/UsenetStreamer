@@ -56,6 +56,10 @@ const QUALITY_FEATURE_PATTERNS = [
   { label: 'SDR', regex: /\bsdr\b/i },
 ];
 
+// Blocklist patterns for unplayable/unwanted release types
+// Matches standalone tokens: .iso, -iso-, (iso), space-delimited, etc.
+const RELEASE_BLOCKLIST_REGEX = /(?:^|[\s.\-_(\[])(?:iso|img|bin|cue|exe)(?:[\s.\-_)\]]|$)/i;
+
 function formatResolutionBadge(resolution) {
   if (!resolution) return null;
   const normalized = resolution.toLowerCase();
@@ -1885,6 +1889,11 @@ async function streamHandler(req, res) {
     const regularStreams = [];
 
     finalNzbResults.forEach((result) => {
+        // Skip releases matching blocklist (ISO, sample, exe, etc.)
+        if (result.title && RELEASE_BLOCKLIST_REGEX.test(result.title)) {
+          return;
+        }
+
         const sizeInGB = result.size ? (result.size / 1073741824).toFixed(2) : null;
         const sizeString = sizeInGB ? `${sizeInGB} GB` : 'Size Unknown';
         const releaseInfo = result.release || {};
