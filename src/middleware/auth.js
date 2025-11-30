@@ -1,7 +1,7 @@
 // Authentication middleware for shared secret validation
 
 function extractTokenFromRequest(req) {
-  const pathMatch = (req.path || '').match(/^\/([^\/]+)\/(manifest\.json|stream|nzb)(?:\b|\/)/i);
+  const pathMatch = (req.path || '').match(/^\/([^\/]+)\/(manifest\.json|stream|nzb|easynews)(?:\b|\/)/i);
   if (pathMatch && pathMatch[1]) {
     return pathMatch[1].trim();
   }

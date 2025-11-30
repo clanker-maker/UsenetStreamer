@@ -2168,6 +2168,20 @@ async function streamHandler(req, res) {
     const requestElapsedMs = Date.now() - requestStartTs;
     const modeLabel = STREAMING_MODE === 'native' ? 'native NZB' : 'NZB';
     console.log(`[STREMIO] Returning ${streams.length} ${modeLabel} streams`, { elapsedMs: requestElapsedMs, ts: new Date().toISOString() });
+    if (process.env.DEBUG_STREAM_PAYLOADS === 'true') {
+      streams.forEach((stream, index) => {
+        console.log(`[STREMIO] Stream[${index}]`, {
+          name: stream.name,
+          description: stream.description,
+          nzbUrl: stream.nzbUrl,
+          url: stream.url,
+          infoHash: stream.infoHash,
+          servers: stream.servers,
+          behaviorHints: stream.behaviorHints,
+          hasMeta: Boolean(stream.meta),
+        });
+      });
+    }
 
     const responsePayload = { streams };
     if (streamCacheKey && cacheMeta) {
@@ -2205,7 +2219,18 @@ async function handleEasynewsNzbDownload(req, res) {
     return;
   }
   try {
+    const requester = req.headers['x-forwarded-for'] || req.ip || req.connection?.remoteAddress || 'unknown';
+    console.log('[EASYNEWS] Incoming NZB request', {
+      requester,
+      payloadPreview: `${payload.slice(0, 16)}${payload.length > 16 ? '…' : ''}`,
+      streamingMode: STREAMING_MODE,
+    });
     const nzbData = await easynewsService.downloadEasynewsNzb(payload);
+    console.log('[EASYNEWS] NZB download succeeded', {
+      fileName: nzbData.fileName,
+      size: nzbData.buffer?.length,
+      contentType: nzbData.contentType,
+    });
     res.setHeader('Content-Type', nzbData.contentType || 'application/x-nzb+xml');
     res.setHeader('Content-Disposition', `attachment; filename="${nzbData.fileName || 'easynews.nzb'}"`);
     res.status(200).send(nzbData.buffer);
