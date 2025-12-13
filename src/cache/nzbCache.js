@@ -6,13 +6,13 @@ let verifiedNzbCacheBytes = 0;
 const VERIFIED_NZB_CACHE_TTL_MS = (() => {
   const raw = Number(process.env.VERIFIED_NZB_CACHE_TTL_MINUTES);
   if (Number.isFinite(raw) && raw >= 0) return raw * 60 * 1000;
-  return 10 * 60 * 1000; // Default 1 hour
+  return 24 * 60 * 60 * 1000; // Default 24 hours
 })();
 
 const VERIFIED_NZB_CACHE_MAX_BYTES = (() => {
   const raw = Number(process.env.VERIFIED_NZB_CACHE_MAX_SIZE_MB);
   if (Number.isFinite(raw) && raw > 0) return raw * 1024 * 1024;
-  return 100 * 1024 * 1024; // Default 100MB
+  return 300 * 1024 * 1024; // Default 300MB
 })();
 
 function cleanupVerifiedNzbCache(now = Date.now()) {

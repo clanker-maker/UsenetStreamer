@@ -1310,12 +1310,13 @@ async function streamHandler(req, res) {
     // Check if we should use TMDb as primary metadata source
     const tmdbConfig = tmdbService.getConfig();
     const shouldUseTmdb = tmdbService.isConfigured() && incomingImdbId;
+    const skipMetadataFetch = Boolean(cachedSearchMeta?.triageComplete);
     
     let tmdbMetadata = null;
     let tmdbMetadataPromise = null;
     
     // Start TMDb fetch in background (don't await yet)
-    if (shouldUseTmdb) {
+    if (shouldUseTmdb && !skipMetadataFetch) {
       console.log('[TMDB] Starting TMDb metadata fetch in background');
       tmdbMetadataPromise = tmdbService.getMetadataAndTitles({
         imdbId: incomingImdbId,
@@ -1337,7 +1338,7 @@ async function streamHandler(req, res) {
       });
     }
 
-    const needsCinemeta = !shouldUseTmdb && (
+    const needsCinemeta = !skipMetadataFetch && !shouldUseTmdb && (
       needsStrictSeriesTvdb
       || needsRelaxedMetadata
       || easynewsService.requiresCinemetaMetadata(isSpecialRequest)
@@ -1773,6 +1774,23 @@ async function streamHandler(req, res) {
           if (easynewsRawQuery && /[^\x00-\x7F]/.test(easynewsRawQuery)) {
             console.log('[EASYNEWS] Skipping search - query contains non-ASCII characters:', easynewsRawQuery);
             easynewsRawQuery = null;
+          }
+        }
+
+        if (!easynewsRawQuery && baseIdentifier) {
+          easynewsRawQuery = baseIdentifier;
+        }
+
+        if (easynewsRawQuery) {
+          const trimmedEasynewsQuery = easynewsRawQuery.trim();
+          const easynewsEpisodeOnly = /^s\d{2}e\d{2}$/i.test(trimmedEasynewsQuery);
+          const easynewsYearOnly = /^\d{4}$/.test(trimmedEasynewsQuery);
+          if (easynewsEpisodeOnly) {
+            console.log('[EASYNEWS] Skipping episode-only query (no title)');
+            easynewsRawQuery = baseIdentifier || null;
+          } else if (easynewsYearOnly && (!movieTitle || !movieTitle.trim())) {
+            console.log('[EASYNEWS] Skipping year-only query (no title)');
+            easynewsRawQuery = baseIdentifier || null;
           }
         }
         

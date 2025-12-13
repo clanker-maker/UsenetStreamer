@@ -6,13 +6,13 @@ let streamCacheBytes = 0;
 const STREAM_CACHE_TTL_MS = (() => {
   const raw = Number(process.env.STREAM_CACHE_TTL_MINUTES);
   if (Number.isFinite(raw) && raw >= 0) return raw * 60 * 1000;
-  return 10 * 60 * 1000; // Default 10 minutes
+  return 24 * 60 * 60 * 1000; // Default 24 hours
 })();
 
 const STREAM_CACHE_MAX_BYTES = (() => {
   const raw = Number(process.env.STREAM_CACHE_MAX_SIZE_MB);
   if (Number.isFinite(raw) && raw > 0) return raw * 1024 * 1024;
-  return 50 * 1024 * 1024; // Default 50MB
+  return 200 * 1024 * 1024; // Default 200MB
 })();
 
 const STREAM_CACHE_MAX_ENTRIES = 1000;
