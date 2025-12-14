@@ -290,14 +290,22 @@ async function triageAndRank(nzbResults, options = {}) {
 
       let nzbPayload;
       try {
+        const abortController = new AbortController();
+        const hardTimeoutTimer = setTimeout(() => {
+          abortController.abort();
+        }, downloadTimeoutMs);
+
         const response = await axios.get(downloadUrl, {
           responseType: 'text',
           timeout: downloadTimeoutMs,
+          signal: abortController.signal,
           headers: {
             Accept: 'application/x-nzb,text/xml;q=0.9,*/*;q=0.8',
             'User-Agent': 'UsenetStreamer-Triage',
           },
           transitional: { silentJSONParsing: true, forcedJSONParsing: false },
+        }).finally(() => {
+          clearTimeout(hardTimeoutTimer);
         });
         if (typeof response.data !== 'string' || response.data.length === 0) {
           throw new Error('Empty NZB payload');
@@ -317,7 +325,9 @@ async function triageAndRank(nzbResults, options = {}) {
         const elapsed = Date.now() - downloadStart;
         decisionMap.set(downloadUrl, attachMetadata(downloadUrl, {
           status: 'fetch-error',
-          error: err?.message || 'Failed to fetch NZB payload',
+          error: err?.code === 'ERR_CANCELED' || err?.message === 'canceled'
+            ? 'NZB download exceeded timeout'
+            : err?.message || 'Failed to fetch NZB payload',
           blockers: ['fetch-error'],
           warnings: [],
           archiveFindings: [],
@@ -326,7 +336,9 @@ async function triageAndRank(nzbResults, options = {}) {
         }));
         logEvent(logger, 'warn', 'NZB download:failed', {
           downloadUrl,
-          message: err?.message,
+          message: err?.code === 'ERR_CANCELED' || err?.message === 'canceled'
+            ? 'NZB download exceeded timeout'
+            : err?.message,
           indexerId: candidate.indexerId,
           indexerName: candidate.indexerName,
           title: candidate.title,
