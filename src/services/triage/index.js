@@ -303,13 +303,14 @@ async function analyzeSingleNzb(raw, ctx) {
   const blockers = new Set();
 
   // Check for unsupported ISO files
-  const hasIso = files.some((file) => {
-    const name = file.filename || guessFilenameFromSubject(file.subject) || '';
-    return name.toLowerCase().endsWith('.iso');
-  });
-  if (hasIso) {
-    blockers.add('unsupported-iso');
-  }
+  // Check for unsupported ISO files - FAILURE VIDEO LOGIC ENABLED (ISO allowed)
+  // const hasIso = files.some((file) => {
+  //   const name = file.filename || guessFilenameFromSubject(file.subject) || '';
+  //   return name.toLowerCase().endsWith('.iso');
+  // });
+  // if (hasIso) {
+  //   blockers.add('unsupported-iso');
+  // }
   const warnings = new Set();
   const archiveFindings = [];
   const archiveFiles = files.filter(isArchiveFile);
